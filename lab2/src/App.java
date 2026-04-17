@@ -11,414 +11,353 @@ import javafx.stage.Stage;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
+/**
+ * Movie Library System — main application class.
+ *
+ * The app is organised into four tabs:
+ * 1. Genres — add / remove genre categories
+ * 2. Movies — add / remove movies linked to a genre
+ * 3. Customers — register / remove customers
+ * 4. Rentals — rent a movie to a customer and track returns
+ *
+ * All data is stored in ObservableLists and Maps declared as fields so
+ * every tab can read and write the same data (shared state).
+ */
 public class App extends Application {
 
-    // ── Customer model — stores all three fields (was lost before) ──
-    private static class Customer {
-        final String name, phone, email;
+    // ──────────────────────────────────────────────────────────────
+    // SHARED DATA
+    // These collections are the single source of truth for the app.
+    // Because they are ObservableLists, JavaFX ComboBoxes that are
+    // bound to them automatically update when items are added/removed.
+    // ──────────────────────────────────────────────────────────────
 
-        Customer(String name, String phone, String email) {
-            this.name = name;
-            this.phone = phone.isEmpty() ? "N/A" : phone;
-            this.email = email.isEmpty() ? "N/A" : email;
-        }
-    }
-
-    // ── Shared data ─────────────────────────────────────────────────
+    /** Names of all genres that have been saved */
     private final ObservableList<String> genreNames = FXCollections.observableArrayList();
+
+    /** Maps each genre name → list of movies belonging to that genre */
     private final Map<String, ObservableList<String>> moviesByGenre = new HashMap<>();
+
+    /** Names of all registered customers */
     private final ObservableList<String> customerNames = FXCollections.observableArrayList();
-    private final Map<String, Customer> customerDetails = new HashMap<>();
+
+    /** Maps each customer name → list of movies they currently have borrowed */
     private final Map<String, ObservableList<String>> borrowedByCustomer = new HashMap<>();
+
+    /** Maps each customer name → list of movies they have already returned */
     private final Map<String, ObservableList<String>> returnedByCustomer = new HashMap<>();
 
-    // ── Shared style constants ───────────────────────────────────────
-    private static final String BTN_PRIMARY = "-fx-background-color: #3A506B; -fx-text-fill: white; " +
-            "-fx-font-size:12pt; -fx-background-radius:6; -fx-cursor:hand; -fx-padding:6 18 6 18;";
-    private static final String BTN_DANGER = "-fx-background-color: #B23A48; -fx-text-fill: white; " +
-            "-fx-font-size:12pt; -fx-background-radius:6; -fx-cursor:hand; -fx-padding:6 18 6 18;";
-    private static final String BTN_SUCCESS = "-fx-background-color: #2D6A4F; -fx-text-fill: white; " +
-            "-fx-font-size:12pt; -fx-background-radius:6; -fx-cursor:hand; -fx-padding:6 18 6 18;";
-    private static final String LABEL_STYLE = "-fx-font: normal bold 15px 'serif';";
-    private static final String PANE_BG = "-fx-background-color: #F5F0E8;";
-    private static final String STATUS_OK = "-fx-text-fill: #2D6A4F; -fx-font-size:11pt;";
-    private static final String STATUS_ERR = "-fx-text-fill: #B23A48; -fx-font-size:11pt;";
+    // ──────────────────────────────────────────────────────────────
+    // APPLICATION ENTRY POINT
+    // ──────────────────────────────────────────────────────────────
 
-    // ────────────────────────────────────────────────────────────────
     @Override
     public void start(Stage stage) {
+
+        // TabPane acts as the main navigation — one tab per module
         TabPane tabPane = new TabPane();
-        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabPane.setStyle("-fx-tab-min-width:130px; -fx-font-size:11.5pt;");
+        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); // tabs cannot be closed
 
         tabPane.getTabs().addAll(
-                new Tab("🎭  Genres", createGenresPane()),
-                new Tab("🎬  Movies", createMoviesPane()),
-                new Tab("👤  Customers", createCustomersPane()),
-                new Tab("📼  Rentals", createRentalsPane()));
+                new Tab("1. Genres", createGenresPane()),
+                new Tab("2. Movies", createMoviesPane()),
+                new Tab("3. Customers", createCustomersPane()),
+                new Tab("4. Rentals", createRentalsPane()));
 
+        // Creating a scene object — the scene holds the entire UI tree
+        Scene scene = new Scene(tabPane, 700, 520);
+
+        // Setting title to the Stage (the OS window)
         stage.setTitle("Movie Library System");
-        stage.setScene(new Scene(tabPane, 720, 560));
-        stage.setResizable(false);
+
+        // Adding scene to the stage
+        stage.setScene(scene);
+
+        // Displaying the contents of the stage
         stage.show();
     }
 
-    // ── Utility helpers ──────────────────────────────────────────────
-
-    /** Inline feedback label — no dialog pop-up needed for trivial messages */
-    private Label statusLabel() {
-        Label lbl = new Label();
-        lbl.setWrapText(true);
-        lbl.setMaxWidth(240);
-        return lbl;
-    }
-
-    private void ok(Label lbl, String msg) {
-        lbl.setText("✔  " + msg);
-        lbl.setStyle(STATUS_OK);
-    }
-
-    private void err(Label lbl, String msg) {
-        lbl.setText("⚠  " + msg);
-        lbl.setStyle(STATUS_ERR);
-    }
-
-    /** Confirmation dialog for destructive actions */
-    private boolean confirmRemove(String item) {
-        Alert a = new Alert(Alert.AlertType.CONFIRMATION);
-        a.setTitle("Confirm Removal");
-        a.setHeaderText(null);
-        a.setContentText("Remove \"" + item + "\"? This cannot be undone.");
-        Optional<ButtonType> r = a.showAndWait();
-        return r.isPresent() && r.get() == ButtonType.OK;
-    }
-
-    private void applyLabelStyle(Text... labels) {
-        for (Text t : labels)
-            t.setStyle(LABEL_STYLE);
-    }
-
-    // ══════════════════════════════════════════════════════════
+    // ──────────────────────────────────────────────────────────────
     // TAB 1 — GENRES
-    // ══════════════════════════════════════════════════════════
+    // Allows the user to add new genre names and remove existing ones.
+    // ──────────────────────────────────────────────────────────────
+
     private GridPane createGenresPane() {
-        Label status = statusLabel();
 
-        Text lblName = new Text("Genre Name:");
-        Text lblList = new Text("Registered:");
-        applyLabelStyle(lblName, lblList);
+        // step 1: create label for the Name field
+        Text text1 = new Text("Name:");
 
-        TextField nameField = new TextField();
-        nameField.setPromptText("e.g. Action, Drama, Sci-Fi …");
-        nameField.setPrefWidth(220);
+        // step 2: create label for the Registered dropdown
+        Text text2 = new Text("Registered:");
 
-        // FIX: ListView gives a much clearer view of all genres vs a single ComboBox
-        ListView<String> genreList = new ListView<>(genreNames);
-        genreList.setPrefHeight(130);
-        genreList.setPrefWidth(220);
+        // step 3: create the text field where the user types a genre name
+        TextField textField1 = new TextField();
 
-        Button saveBtn = new Button("✔  Save");
-        Button removeBtn = new Button("✖  Remove");
-        saveBtn.setStyle(BTN_PRIMARY);
-        removeBtn.setStyle(BTN_DANGER);
+        // step 4: create a ComboBox that shows all saved genres (bound to genreNames
+        // list)
+        ComboBox<String> comboBox = new ComboBox<>(genreNames);
 
-        GridPane gp = baseGrid();
-        gp.add(lblName, 0, 0);
-        gp.add(nameField, 1, 0);
-        gp.add(saveBtn, 1, 1);
-        gp.add(status, 1, 2);
-        gp.add(lblList, 0, 3);
-        gp.add(genreList, 1, 3);
-        gp.add(removeBtn, 1, 4);
+        // step 5: create the Save and Remove action buttons
+        Button button1 = new Button("Save");
+        Button button2 = new Button("Remove");
 
-        // ── Save
-        saveBtn.setOnAction(e -> {
-            String name = nameField.getText().trim();
-            if (name.isEmpty()) {
-                err(status, "Genre name cannot be empty.");
-                return;
-            }
-            if (genreNames.contains(name)) {
-                err(status, "Genre already exists.");
-                return;
-            }
-            genreNames.add(name);
-            moviesByGenre.put(name, FXCollections.observableArrayList());
-            nameField.clear();
-            ok(status, "\"" + name + "\" saved.");
-        });
+        // step 6: create the GridPane layout container
+        GridPane gridPane = new GridPane();
 
-        // ── Remove (FIX: block removal when genre still has movies)
-        removeBtn.setOnAction(e -> {
-            String sel = genreList.getSelectionModel().getSelectedItem();
-            if (sel == null) {
-                err(status, "Select a genre from the list.");
-                return;
-            }
-            if (!moviesByGenre.getOrDefault(sel, FXCollections.observableArrayList()).isEmpty()) {
-                err(status, "Remove all movies in this genre first.");
-                return;
-            }
-            if (confirmRemove(sel)) {
-                genreNames.remove(sel);
-                moviesByGenre.remove(sel);
-                ok(status, "\"" + sel + "\" removed.");
+        // step 7: set minimum size of the pane
+        gridPane.setMinSize(600, 400);
+
+        // step 8: set padding around the pane edges
+        gridPane.setPadding(new Insets(10, 10, 10, 10));
+
+        // step 9: set vertical and horizontal gaps between grid cells
+        gridPane.setVgap(10);
+        gridPane.setHgap(10);
+
+        // step 10: centre the grid inside the tab
+        gridPane.setAlignment(Pos.CENTER);
+
+        // step 11: place each node at its column (0=left, 1=right) and row position
+        gridPane.add(text1, 0, 0); // "Name:" label — column 0, row 0
+        gridPane.add(textField1, 1, 0); // name text field — column 1, row 0
+        gridPane.add(button1, 1, 1); // Save button — column 1, row 1
+        gridPane.add(text2, 0, 2); // "Registered:" label— column 0, row 2
+        gridPane.add(comboBox, 1, 2); // genre dropdown — column 1, row 2
+        gridPane.add(button2, 1, 3); // Remove button — column 1, row 3
+
+        // step 12: apply styles to make the UI look polished
+        button1.setStyle("-fx-background-color: darkslateblue; -fx-text-fill: white; -fx-font-size:13pt;");
+        button2.setStyle("-fx-background-color: darkslateblue; -fx-text-fill: white; -fx-font-size:13pt;");
+        text1.setStyle("-fx-font: normal bold 20px 'serif' ");
+        text2.setStyle("-fx-font: normal bold 20px 'serif' ");
+        gridPane.setStyle("-fx-background-color: BEIGE;");
+
+        // Save button — adds the typed genre to the shared list
+        button1.setOnAction(e -> {
+            String name = textField1.getText().trim();
+            if (!name.isEmpty() && !genreNames.contains(name)) {
+                genreNames.add(name); // update shared list
+                moviesByGenre.put(name, FXCollections.observableArrayList()); // create empty movie list for this genre
+                textField1.clear();
             }
         });
 
-        return gp;
+        // Remove button — deletes the genre selected in the ComboBox
+        button2.setOnAction(e -> {
+            String selected = comboBox.getValue();
+            if (selected != null) {
+                genreNames.remove(selected); // remove from shared list
+                moviesByGenre.remove(selected); // remove its movie list too
+                comboBox.setValue(null);
+            }
+        });
+
+        return gridPane;
     }
 
-    // ══════════════════════════════════════════════════════════
+    // ──────────────────────────────────────────────────────────────
     // TAB 2 — MOVIES
-    // ══════════════════════════════════════════════════════════
+    // Allows the user to add movies to a selected genre and remove them.
+    // ──────────────────────────────────────────────────────────────
+
     private GridPane createMoviesPane() {
-        Label status = statusLabel();
 
-        Text lblGenre = new Text("Genre:");
-        Text lblName = new Text("Movie Title:");
-        Text lblList = new Text("In Genre:");
-        applyLabelStyle(lblGenre, lblName, lblList);
+        // Labels for each row
+        Text textGenres = new Text("Genres:");
+        Text textName = new Text("Name:");
+        Text textRegistered = new Text("Registered:");
 
+        // Genre dropdown — populated from the shared genreNames list
         ComboBox<String> genreCombo = new ComboBox<>(genreNames);
-        genreCombo.setPromptText("Select genre");
-        genreCombo.setPrefWidth(220);
 
+        // Text field for the movie title
         TextField nameField = new TextField();
-        nameField.setPromptText("Enter movie title …");
-        nameField.setPrefWidth(220);
 
-        // FIX: ListView replaces ComboBox for Registered — shows all titles at once
-        ListView<String> movieList = new ListView<>();
-        movieList.setPrefHeight(130);
-        movieList.setPrefWidth(220);
+        // Registered dropdown — shows movies that belong to the selected genre
+        ComboBox<String> registeredCombo = new ComboBox<>();
 
-        Button saveBtn = new Button("✔  Save");
-        Button removeBtn = new Button("✖  Remove");
-        saveBtn.setStyle(BTN_PRIMARY);
-        removeBtn.setStyle(BTN_DANGER);
+        Button saveBtn = new Button("Save");
+        Button removeBtn = new Button("Remove");
 
+        // When the user picks a genre, load that genre's movies into registeredCombo
         genreCombo.setOnAction(e -> {
             String genre = genreCombo.getValue();
             if (genre != null) {
-                movieList.setItems(moviesByGenre.getOrDefault(genre, FXCollections.observableArrayList()));
-                movieList.getSelectionModel().clearSelection();
+                registeredCombo.setItems(
+                        moviesByGenre.getOrDefault(genre, FXCollections.observableArrayList()));
+                registeredCombo.setValue(null);
             }
         });
 
-        GridPane gp = baseGrid();
-        gp.add(lblGenre, 0, 0);
-        gp.add(genreCombo, 1, 0);
-        gp.add(lblName, 0, 1);
-        gp.add(nameField, 1, 1);
-        gp.add(saveBtn, 1, 2);
-        gp.add(status, 1, 3);
-        gp.add(lblList, 0, 4);
-        gp.add(movieList, 1, 4);
-        gp.add(removeBtn, 1, 5);
+        // Build the GridPane layout
+        GridPane gridPane = new GridPane();
+        gridPane.setMinSize(600, 400);
+        gridPane.setPadding(new Insets(10, 10, 10, 10));
+        gridPane.setVgap(10);
+        gridPane.setHgap(10);
+        gridPane.setAlignment(Pos.CENTER);
 
-        // ── Save (FIX: duplicate movie check added)
+        gridPane.add(textGenres, 0, 0);
+        gridPane.add(genreCombo, 1, 0);
+        gridPane.add(textName, 0, 1);
+        gridPane.add(nameField, 1, 1);
+        gridPane.add(saveBtn, 1, 2);
+        gridPane.add(textRegistered, 0, 3);
+        gridPane.add(registeredCombo, 1, 3);
+        gridPane.add(removeBtn, 1, 4);
+
+        // Styling
+        saveBtn.setStyle("-fx-background-color: darkslateblue; -fx-text-fill: white; -fx-font-size:13pt;");
+        removeBtn.setStyle("-fx-background-color: darkslateblue; -fx-text-fill: white; -fx-font-size:13pt;");
+        textGenres.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textName.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textRegistered.setStyle("-fx-font: normal bold 20px 'serif' ");
+        gridPane.setStyle("-fx-background-color: BEIGE;");
+
+        // Save button — adds the movie to the selected genre's list
         saveBtn.setOnAction(e -> {
             String genre = genreCombo.getValue();
             String name = nameField.getText().trim();
-            if (genre == null) {
-                err(status, "Please select a genre first.");
-                return;
+            if (genre != null && !name.isEmpty()) {
+                moviesByGenre.computeIfAbsent(genre, k -> FXCollections.observableArrayList()).add(name);
+                registeredCombo.setItems(moviesByGenre.get(genre)); // refresh dropdown
+                nameField.clear();
             }
-            if (name.isEmpty()) {
-                err(status, "Movie title cannot be empty.");
-                return;
-            }
-            ObservableList<String> list = moviesByGenre.computeIfAbsent(genre,
-                    k -> FXCollections.observableArrayList());
-            if (list.contains(name)) {
-                err(status, "Movie already exists in this genre.");
-                return;
-            }
-            list.add(name);
-            movieList.setItems(list);
-            nameField.clear();
-            ok(status, "\"" + name + "\" added to " + genre + ".");
         });
 
-        // ── Remove
+        // Remove button — removes the selected movie from the genre
         removeBtn.setOnAction(e -> {
             String genre = genreCombo.getValue();
-            String sel = movieList.getSelectionModel().getSelectedItem();
-            if (genre == null || sel == null) {
-                err(status, "Select a genre and a movie.");
-                return;
-            }
-            if (confirmRemove(sel)) {
-                moviesByGenre.get(genre).remove(sel);
-                ok(status, "\"" + sel + "\" removed.");
+            String selected = registeredCombo.getValue();
+            if (genre != null && selected != null) {
+                moviesByGenre.get(genre).remove(selected);
+                registeredCombo.setValue(null);
             }
         });
 
-        return gp;
+        return gridPane;
     }
 
-    // ══════════════════════════════════════════════════════════
+    // ──────────────────────────────────────────────────────────────
     // TAB 3 — CUSTOMERS
-    // ══════════════════════════════════════════════════════════
+    // Allows the user to register customers (name, phone, email) and remove them.
+    // ──────────────────────────────────────────────────────────────
+
     private GridPane createCustomersPane() {
-        Label status = statusLabel();
 
-        Text lblName = new Text("Name:");
-        Text lblPhone = new Text("Phone:");
-        Text lblEmail = new Text("Email:");
-        Text lblList = new Text("Registered:");
-        Text lblDetails = new Text("Details:");
-        applyLabelStyle(lblName, lblPhone, lblEmail, lblList, lblDetails);
+        // Labels for each input row
+        Text textName = new Text("Name:");
+        Text textPhone = new Text("Phone:");
+        Text textEmail = new Text("Email:");
+        Text textRegistered = new Text("Registered:");
 
+        // Input fields
         TextField nameField = new TextField();
-        nameField.setPromptText("Full name");
         TextField phoneField = new TextField();
-        phoneField.setPromptText("+254 …");
         TextField emailField = new TextField();
-        emailField.setPromptText("email@example.com");
 
-        ListView<String> customerList = new ListView<>(customerNames);
-        customerList.setPrefHeight(100);
-        customerList.setPrefWidth(220);
+        // Registered dropdown — shows all saved customers
+        ComboBox<String> registeredCombo = new ComboBox<>(customerNames);
 
-        // FIX: Details pane — phone/email are now stored and displayed (previously
-        // discarded)
-        Label detailsLbl = new Label("Select a customer to view their details.");
-        detailsLbl.setStyle("-fx-font-size:11pt; -fx-text-fill:#555;");
-        detailsLbl.setWrapText(true);
-        detailsLbl.setMaxWidth(230);
+        Button saveBtn = new Button("Save");
+        Button removeBtn = new Button("Remove");
 
-        customerList.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> {
-            if (sel != null && customerDetails.containsKey(sel)) {
-                Customer c = customerDetails.get(sel);
-                detailsLbl.setText("📞  " + c.phone + "\n✉   " + c.email);
-                detailsLbl.setStyle("-fx-font-size:11pt; -fx-text-fill:#333;");
-            } else {
-                detailsLbl.setText("Select a customer to view their details.");
-                detailsLbl.setStyle("-fx-font-size:11pt; -fx-text-fill:#555;");
-            }
-        });
+        // Build the GridPane layout
+        GridPane gridPane = new GridPane();
+        gridPane.setMinSize(600, 400);
+        gridPane.setPadding(new Insets(10, 10, 10, 10));
+        gridPane.setVgap(10);
+        gridPane.setHgap(10);
+        gridPane.setAlignment(Pos.CENTER);
 
-        Button saveBtn = new Button("✔  Save");
-        Button removeBtn = new Button("✖  Remove");
-        saveBtn.setStyle(BTN_PRIMARY);
-        removeBtn.setStyle(BTN_DANGER);
+        gridPane.add(textName, 0, 0);
+        gridPane.add(nameField, 1, 0);
+        gridPane.add(textPhone, 0, 1);
+        gridPane.add(phoneField, 1, 1);
+        gridPane.add(textEmail, 0, 2);
+        gridPane.add(emailField, 1, 2);
+        gridPane.add(saveBtn, 1, 3);
+        gridPane.add(textRegistered, 0, 4);
+        gridPane.add(registeredCombo, 1, 4);
+        gridPane.add(removeBtn, 1, 5);
 
-        GridPane gp = baseGrid();
-        gp.setPadding(new Insets(20, 40, 20, 40));
-        gp.add(lblName, 0, 0);
-        gp.add(nameField, 1, 0);
-        gp.add(lblPhone, 0, 1);
-        gp.add(phoneField, 1, 1);
-        gp.add(lblEmail, 0, 2);
-        gp.add(emailField, 1, 2);
-        gp.add(saveBtn, 1, 3);
-        gp.add(status, 1, 4);
-        gp.add(lblList, 0, 5);
-        gp.add(customerList, 1, 5);
-        gp.add(lblDetails, 0, 6);
-        gp.add(detailsLbl, 1, 6);
-        gp.add(removeBtn, 1, 7);
+        // Styling
+        saveBtn.setStyle("-fx-background-color: darkslateblue; -fx-text-fill: white; -fx-font-size:13pt;");
+        removeBtn.setStyle("-fx-background-color: darkslateblue; -fx-text-fill: white; -fx-font-size:13pt;");
+        textName.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textPhone.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textEmail.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textRegistered.setStyle("-fx-font: normal bold 20px 'serif' ");
+        gridPane.setStyle("-fx-background-color: BEIGE;");
 
-        // ── Save
+        // Save button — registers a new customer and sets up their rental history
         saveBtn.setOnAction(e -> {
             String name = nameField.getText().trim();
-            String phone = phoneField.getText().trim();
-            String email = emailField.getText().trim();
-            if (name.isEmpty()) {
-                err(status, "Customer name cannot be empty.");
-                return;
+            if (!name.isEmpty() && !customerNames.contains(name)) {
+                customerNames.add(name); // add to shared customer list
+                borrowedByCustomer.put(name, FXCollections.observableArrayList()); // start with empty borrowed list
+                returnedByCustomer.put(name, FXCollections.observableArrayList()); // start with empty returned list
+                nameField.clear();
+                phoneField.clear();
+                emailField.clear();
             }
-            if (customerNames.contains(name)) {
-                err(status, "Customer already registered.");
-                return;
-            }
-            customerNames.add(name);
-            customerDetails.put(name, new Customer(name, phone, email));
-            borrowedByCustomer.put(name, FXCollections.observableArrayList());
-            returnedByCustomer.put(name, FXCollections.observableArrayList());
-            nameField.clear();
-            phoneField.clear();
-            emailField.clear();
-            ok(status, "\"" + name + "\" registered.");
         });
 
-        // ── Remove (FIX: block removal when customer has unreturned movies)
+        // Remove button — deletes the selected customer and their rental history
         removeBtn.setOnAction(e -> {
-            String sel = customerList.getSelectionModel().getSelectedItem();
-            if (sel == null) {
-                err(status, "Select a customer from the list.");
-                return;
-            }
-            if (!borrowedByCustomer.getOrDefault(sel, FXCollections.observableArrayList()).isEmpty()) {
-                err(status, "Customer has unreturned movies.");
-                return;
-            }
-            if (confirmRemove(sel)) {
-                customerNames.remove(sel);
-                customerDetails.remove(sel);
-                borrowedByCustomer.remove(sel);
-                returnedByCustomer.remove(sel);
-                detailsLbl.setText("Select a customer to view their details.");
-                ok(status, "\"" + sel + "\" removed.");
+            String selected = registeredCombo.getValue();
+            if (selected != null) {
+                customerNames.remove(selected);
+                borrowedByCustomer.remove(selected);
+                returnedByCustomer.remove(selected);
+                registeredCombo.setValue(null);
             }
         });
 
-        return gp;
+        return gridPane;
     }
 
-    // ══════════════════════════════════════════════════════════
+    // ──────────────────────────────────────────────────────────────
     // TAB 4 — RENTALS
-    // ══════════════════════════════════════════════════════════
+    // Links a movie to a customer (rent), and allows returning borrowed movies.
+    // Borrowed = movies the customer currently has.
+    // Returned = movies the customer has brought back.
+    // ──────────────────────────────────────────────────────────────
+
     private GridPane createRentalsPane() {
-        Label status = statusLabel();
 
-        Text lblCustomer = new Text("Customer:");
-        Text lblGenre = new Text("Genre:");
-        Text lblMovie = new Text("Movie:");
-        Text lblBorrowed = new Text("Borrowed:");
-        Text lblReturned = new Text("Returned:");
-        applyLabelStyle(lblCustomer, lblGenre, lblMovie, lblBorrowed, lblReturned);
+        // Labels for each row
+        Text textCustomer = new Text("Customer:");
+        Text textGenre = new Text("Genre:");
+        Text textMovies = new Text("Movies:");
+        Text textBorrowed = new Text("Borrowed:");
+        Text textReturned = new Text("Returned:");
 
-        ComboBox<String> customerCombo = new ComboBox<>(customerNames);
-        ComboBox<String> genreCombo = new ComboBox<>(genreNames);
-        ComboBox<String> moviesCombo = new ComboBox<>();
+        // Dropdowns for selecting who is renting and what they want
+        ComboBox<String> customerCombo = new ComboBox<>(customerNames); // from shared list
+        ComboBox<String> genreCombo = new ComboBox<>(genreNames); // from shared list
+        ComboBox<String> moviesCombo = new ComboBox<>(); // filled when genre is selected
 
-        customerCombo.setPromptText("Select customer");
-        customerCombo.setPrefWidth(220);
-        genreCombo.setPromptText("Select genre");
-        genreCombo.setPrefWidth(220);
-        moviesCombo.setPromptText("Select movie");
-        moviesCombo.setPrefWidth(220);
+        // Dropdowns showing the customer's rental history
+        ComboBox<String> borrowedCombo = new ComboBox<>();
+        ComboBox<String> returnedCombo = new ComboBox<>();
 
-        // FIX: ListViews replace ComboBoxes for borrowed/returned — visible at a glance
-        ListView<String> borrowedList = new ListView<>();
-        borrowedList.setPrefHeight(100);
-        borrowedList.setPrefWidth(220);
+        Button saveBtn = new Button("Save");
+        Button returnBtn = new Button("Return");
 
-        ListView<String> returnedList = new ListView<>();
-        returnedList.setPrefHeight(100);
-        returnedList.setPrefWidth(220);
-
-        Button rentBtn = new Button("📼  Rent");
-        Button returnBtn = new Button("↩  Return");
-        rentBtn.setStyle(BTN_SUCCESS);
-        returnBtn.setStyle(BTN_PRIMARY);
-
+        // When a customer is selected, load their borrowed and returned movies
         customerCombo.setOnAction(e -> {
-            String c = customerCombo.getValue();
-            if (c != null) {
-                borrowedList.setItems(borrowedByCustomer.getOrDefault(c, FXCollections.observableArrayList()));
-                returnedList.setItems(returnedByCustomer.getOrDefault(c, FXCollections.observableArrayList()));
-                borrowedList.getSelectionModel().clearSelection();
-                returnedList.getSelectionModel().clearSelection();
-                status.setText("");
+            String customer = customerCombo.getValue();
+            if (customer != null) {
+                borrowedCombo.setItems(borrowedByCustomer.getOrDefault(customer, FXCollections.observableArrayList()));
+                returnedCombo.setItems(returnedByCustomer.getOrDefault(customer, FXCollections.observableArrayList()));
+                borrowedCombo.setValue(null);
+                returnedCombo.setValue(null);
             }
         });
 
+        // When a genre is selected, load its movies into the Movies dropdown
         genreCombo.setOnAction(e -> {
             String genre = genreCombo.getValue();
             if (genre != null) {
@@ -427,79 +366,63 @@ public class App extends Application {
             }
         });
 
-        GridPane gp = baseGrid();
-        gp.setPadding(new Insets(16, 40, 16, 40));
-        gp.add(lblCustomer, 0, 0);
-        gp.add(customerCombo, 1, 0);
-        gp.add(lblGenre, 0, 1);
-        gp.add(genreCombo, 1, 1);
-        gp.add(lblMovie, 0, 2);
-        gp.add(moviesCombo, 1, 2);
-        gp.add(rentBtn, 1, 3);
-        gp.add(status, 1, 4);
-        gp.add(lblBorrowed, 0, 5);
-        gp.add(borrowedList, 1, 5);
-        gp.add(returnBtn, 1, 6);
-        gp.add(lblReturned, 0, 7);
-        gp.add(returnedList, 1, 7);
+        // Build the GridPane layout
+        GridPane gridPane = new GridPane();
+        gridPane.setMinSize(600, 400);
+        gridPane.setPadding(new Insets(10, 10, 10, 10));
+        gridPane.setVgap(10);
+        gridPane.setHgap(10);
+        gridPane.setAlignment(Pos.CENTER);
 
-        // ── Rent (FIX: guard against duplicate borrowing)
-        rentBtn.setOnAction(e -> {
+        gridPane.add(textCustomer, 0, 0);
+        gridPane.add(customerCombo, 1, 0);
+        gridPane.add(textGenre, 0, 1);
+        gridPane.add(genreCombo, 1, 1);
+        gridPane.add(textMovies, 0, 2);
+        gridPane.add(moviesCombo, 1, 2);
+        gridPane.add(saveBtn, 1, 3); // "Save rental" button
+        gridPane.add(textBorrowed, 0, 4);
+        gridPane.add(borrowedCombo, 1, 4);
+        gridPane.add(returnBtn, 1, 5); // "Return movie" button
+        gridPane.add(textReturned, 0, 6);
+        gridPane.add(returnedCombo, 1, 6);
+
+        // Styling
+        saveBtn.setStyle("-fx-background-color: darkslateblue; -fx-text-fill: white; -fx-font-size:13pt;");
+        returnBtn.setStyle("-fx-background-color: darkslateblue; -fx-text-fill: white; -fx-font-size:13pt;");
+        textCustomer.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textGenre.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textMovies.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textBorrowed.setStyle("-fx-font: normal bold 20px 'serif' ");
+        textReturned.setStyle("-fx-font: normal bold 20px 'serif' ");
+        gridPane.setStyle("-fx-background-color: BEIGE;");
+
+        // Save button — assigns the selected movie to the customer's borrowed list
+        saveBtn.setOnAction(e -> {
             String customer = customerCombo.getValue();
             String movie = moviesCombo.getValue();
-            if (customer == null) {
-                err(status, "Please select a customer.");
-                return;
+            if (customer != null && movie != null) {
+                borrowedByCustomer.computeIfAbsent(customer, k -> FXCollections.observableArrayList()).add(movie);
+                borrowedCombo.setItems(borrowedByCustomer.get(customer)); // refresh borrowed dropdown
+                moviesCombo.setValue(null);
             }
-            if (movie == null) {
-                err(status, "Please select a movie.");
-                return;
-            }
-            ObservableList<String> borrowed = borrowedByCustomer.computeIfAbsent(customer,
-                    k -> FXCollections.observableArrayList());
-            if (borrowed.contains(movie)) {
-                err(status, "Customer already has this movie.");
-                return;
-            }
-            borrowed.add(movie);
-            borrowedList.setItems(borrowed);
-            moviesCombo.setValue(null);
-            ok(status, "\"" + movie + "\" rented to " + customer + ".");
         });
 
-        // ── Return (FIX: select from ListView, not a ComboBox)
+        // Return button — moves the selected movie from Borrowed → Returned
         returnBtn.setOnAction(e -> {
             String customer = customerCombo.getValue();
-            String movie = borrowedList.getSelectionModel().getSelectedItem();
-            if (customer == null) {
-                err(status, "Please select a customer.");
-                return;
+            String movie = borrowedCombo.getValue();
+            if (customer != null && movie != null) {
+                borrowedByCustomer.get(customer).remove(movie); // remove from borrowed
+                returnedByCustomer.computeIfAbsent(customer, k -> FXCollections.observableArrayList()).add(movie); // add
+                                                                                                                   // to
+                                                                                                                   // returned
+                returnedCombo.setItems(returnedByCustomer.get(customer)); // refresh returned dropdown
+                borrowedCombo.setValue(null);
             }
-            if (movie == null) {
-                err(status, "Select a movie from the Borrowed list.");
-                return;
-            }
-            borrowedByCustomer.get(customer).remove(movie);
-            ObservableList<String> returned = returnedByCustomer.computeIfAbsent(customer,
-                    k -> FXCollections.observableArrayList());
-            returned.add(movie);
-            returnedList.setItems(returned);
-            ok(status, "\"" + movie + "\" returned successfully.");
         });
 
-        return gp;
-    }
-
-    // ── Shared grid factory ──────────────────────────────────────────
-    private GridPane baseGrid() {
-        GridPane gp = new GridPane();
-        gp.setMinSize(600, 400);
-        gp.setPadding(new Insets(30, 40, 30, 40));
-        gp.setVgap(13);
-        gp.setHgap(16);
-        gp.setAlignment(Pos.CENTER);
-        gp.setStyle(PANE_BG);
-        return gp;
+        return gridPane;
     }
 
     public static void main(String[] args) {
