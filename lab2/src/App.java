@@ -1,5 +1,4 @@
 import javafx.application.Application;
-import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -13,6 +12,7 @@ import javafx.stage.WindowEvent;
 
 import java.io.*;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,7 +29,7 @@ public class App extends Application {
     // ── FILE PATH ─────────────────────────────────────────────────
     private static final String DATA_FILE = "library.dat";
 
-    // ── STYLE CONSTANTS (unchanged) ───────────────────────────────
+    // ── STYLE CONSTANTS ───────────────────────────────────────────
     private static final String BG = "-fx-background-color: #EEEAF6;";
     private static final String BTN_SAVE = "-fx-background-color: #3D3170; -fx-text-fill: white;"
             + " -fx-font-size: 12pt; -fx-padding: 6 22 6 22; -fx-background-radius: 6;";
@@ -44,9 +44,21 @@ public class App extends Application {
             + " -fx-border-color: #B0A8D4; -fx-border-width: 1; -fx-padding: 5 10;";
     private static final String COMBO = "-fx-background-radius: 5;";
 
+    // ── SORTING HELPERS ───────────────────────────────────────────
+
+    /** Sort an ObservableList alphabetically (case-insensitive) */
+    private void sortList(ObservableList<String> list) {
+        FXCollections.sort(list, String.CASE_INSENSITIVE_ORDER);
+    }
+
+    /** Add item to list and maintain alphabetical order */
+    private void addAndSort(ObservableList<String> list, String item) {
+        list.add(item);
+        sortList(list);
+    }
+
     // ── PERSISTENCE METHODS ───────────────────────────────────────
 
-    /** Load data from file into memory. Call this BEFORE building UI. */
     @SuppressWarnings("unchecked")
     private void loadData() {
         File file = new File(DATA_FILE);
@@ -56,47 +68,46 @@ public class App extends Application {
         }
 
         try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(file))) {
-            // Read genres
             List<String> loadedGenres = (List<String>) in.readObject();
             genreNames.addAll(loadedGenres);
+            sortList(genreNames); // Sort after loading
 
-            // Read movies by genre (stored as plain HashMap with ArrayLists)
             Map<String, List<String>> loadedMovies = (Map<String, List<String>>) in.readObject();
             for (Map.Entry<String, List<String>> entry : loadedMovies.entrySet()) {
-                moviesByGenre.put(entry.getKey(), FXCollections.observableArrayList(entry.getValue()));
+                ObservableList<String> sortedMovies = FXCollections.observableArrayList(entry.getValue());
+                sortList(sortedMovies);
+                moviesByGenre.put(entry.getKey(), sortedMovies);
             }
 
-            // Read customers
             List<String> loadedCustomers = (List<String>) in.readObject();
             customerNames.addAll(loadedCustomers);
+            sortList(customerNames); // Sort after loading
 
-            // Read borrowed history
             Map<String, List<String>> loadedBorrowed = (Map<String, List<String>>) in.readObject();
             for (Map.Entry<String, List<String>> entry : loadedBorrowed.entrySet()) {
-                borrowedByCustomer.put(entry.getKey(), FXCollections.observableArrayList(entry.getValue()));
+                ObservableList<String> sortedBorrowed = FXCollections.observableArrayList(entry.getValue());
+                sortList(sortedBorrowed);
+                borrowedByCustomer.put(entry.getKey(), sortedBorrowed);
             }
 
-            // Read returned history
             Map<String, List<String>> loadedReturned = (Map<String, List<String>>) in.readObject();
             for (Map.Entry<String, List<String>> entry : loadedReturned.entrySet()) {
-                returnedByCustomer.put(entry.getKey(), FXCollections.observableArrayList(entry.getValue()));
+                ObservableList<String> sortedReturned = FXCollections.observableArrayList(entry.getValue());
+                sortList(sortedReturned);
+                returnedByCustomer.put(entry.getKey(), sortedReturned);
             }
 
-            System.out.println("Data loaded successfully from " + DATA_FILE);
+            System.out.println("Data loaded and sorted successfully from " + DATA_FILE);
 
         } catch (IOException | ClassNotFoundException e) {
             System.err.println("Failed to load data: " + e.getMessage());
-            // Continue with empty data structures
         }
     }
 
-    /** Save data from memory to file. Call this on exit or after modifications. */
     private void saveData() {
         try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(DATA_FILE))) {
-            // Convert ObservableLists to plain ArrayLists for serialization
             out.writeObject(new ArrayList<>(genreNames));
 
-            // Convert ObservableLists inside map to plain Lists
             Map<String, List<String>> moviesPlain = new HashMap<>();
             for (Map.Entry<String, ObservableList<String>> entry : moviesByGenre.entrySet()) {
                 moviesPlain.put(entry.getKey(), new ArrayList<>(entry.getValue()));
@@ -124,7 +135,7 @@ public class App extends Application {
         }
     }
 
-    // ── SHARED HELPERS (unchanged) ────────────────────────────────
+    // ── SHARED HELPERS ────────────────────────────────────────────
     private void styleButton(Button btn, boolean isSave) {
         String base = isSave ? BTN_SAVE : BTN_REM;
         String hover = isSave ? BTN_SAVE_HOVER : BTN_REM_HOVER;
@@ -168,7 +179,6 @@ public class App extends Application {
 
     @Override
     public void start(Stage stage) {
-        // 1. LOAD DATA FIRST — before building any UI
         loadData();
 
         TabPane tabPane = new TabPane();
@@ -181,7 +191,6 @@ public class App extends Application {
                 new Tab("3. Customers", createCustomersPane()),
                 new Tab("4. Rentals", createRentalsPane()));
 
-        // 2. SAVE ON WINDOW CLOSE
         stage.setOnCloseRequest((WindowEvent e) -> {
             saveData();
         });
@@ -213,10 +222,10 @@ public class App extends Application {
         saveBtn.setOnAction(e -> {
             String name = nameField.getText().trim();
             if (!name.isEmpty() && !genreNames.contains(name)) {
-                genreNames.add(name);
+                addAndSort(genreNames, name); // Add and maintain sort order
                 moviesByGenre.put(name, FXCollections.observableArrayList());
                 nameField.clear();
-                saveData(); // 3. AUTO-SAVE AFTER CHANGE
+                saveData();
             }
         });
 
@@ -226,7 +235,7 @@ public class App extends Application {
                 genreNames.remove(selected);
                 moviesByGenre.remove(selected);
                 registeredCombo.setValue(null);
-                saveData(); // 3. AUTO-SAVE AFTER CHANGE
+                saveData();
             }
         });
 
@@ -267,10 +276,12 @@ public class App extends Application {
             String genre = genreCombo.getValue();
             String name = nameField.getText().trim();
             if (genre != null && !name.isEmpty()) {
-                moviesByGenre.computeIfAbsent(genre, k -> FXCollections.observableArrayList()).add(name);
-                registeredCombo.setItems(moviesByGenre.get(genre));
+                ObservableList<String> movies = moviesByGenre.computeIfAbsent(genre,
+                        k -> FXCollections.observableArrayList());
+                addAndSort(movies, name); // Add and maintain sort order
+                registeredCombo.setItems(movies);
                 nameField.clear();
-                saveData(); // AUTO-SAVE
+                saveData();
             }
         });
 
@@ -280,7 +291,7 @@ public class App extends Application {
             if (genre != null && selected != null) {
                 moviesByGenre.get(genre).remove(selected);
                 registeredCombo.setValue(null);
-                saveData(); // AUTO-SAVE
+                saveData();
             }
         });
 
@@ -317,13 +328,13 @@ public class App extends Application {
         saveBtn.setOnAction(e -> {
             String name = nameField.getText().trim();
             if (!name.isEmpty() && !customerNames.contains(name)) {
-                customerNames.add(name);
+                addAndSort(customerNames, name); // Add and maintain sort order
                 borrowedByCustomer.put(name, FXCollections.observableArrayList());
                 returnedByCustomer.put(name, FXCollections.observableArrayList());
                 nameField.clear();
                 phoneField.clear();
                 emailField.clear();
-                saveData(); // AUTO-SAVE
+                saveData();
             }
         });
 
@@ -334,7 +345,7 @@ public class App extends Application {
                 borrowedByCustomer.remove(selected);
                 returnedByCustomer.remove(selected);
                 registeredCombo.setValue(null);
-                saveData(); // AUTO-SAVE
+                saveData();
             }
         });
 
@@ -390,10 +401,12 @@ public class App extends Application {
             String customer = customerCombo.getValue();
             String movie = moviesCombo.getValue();
             if (customer != null && movie != null) {
-                borrowedByCustomer.computeIfAbsent(customer, k -> FXCollections.observableArrayList()).add(movie);
-                borrowedCombo.setItems(borrowedByCustomer.get(customer));
+                ObservableList<String> borrowed = borrowedByCustomer.computeIfAbsent(customer,
+                        k -> FXCollections.observableArrayList());
+                addAndSort(borrowed, movie); // Add and maintain sort order
+                borrowedCombo.setItems(borrowed);
                 moviesCombo.setValue(null);
-                saveData(); // AUTO-SAVE
+                saveData();
             }
         });
 
@@ -402,10 +415,12 @@ public class App extends Application {
             String movie = borrowedCombo.getValue();
             if (customer != null && movie != null) {
                 borrowedByCustomer.get(customer).remove(movie);
-                returnedByCustomer.computeIfAbsent(customer, k -> FXCollections.observableArrayList()).add(movie);
-                returnedCombo.setItems(returnedByCustomer.get(customer));
+                ObservableList<String> returned = returnedByCustomer.computeIfAbsent(customer,
+                        k -> FXCollections.observableArrayList());
+                addAndSort(returned, movie); // Add and maintain sort order
+                returnedCombo.setItems(returned);
                 borrowedCombo.setValue(null);
-                saveData(); // AUTO-SAVE
+                saveData();
             }
         });
 
